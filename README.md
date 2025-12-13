@@ -1,1 +1,1 @@
-# KawaiiAPI
+# KawaiiAPI: v1.0
