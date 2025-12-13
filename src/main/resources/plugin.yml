@@ -1,0 +1,4 @@
+name: KawaiiAPI
+version: 1.0
+main: dev.oumaimaa.kawaiiapi.KawaiiAPI
+api-version: 1.21
