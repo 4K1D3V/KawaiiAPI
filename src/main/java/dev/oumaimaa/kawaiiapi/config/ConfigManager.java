@@ -1,30 +1,24 @@
 package dev.oumaimaa.kawaiiapi.config;
 
-import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.JsonGenerator;
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.util.DefaultIndenter;
-import com.fasterxml.jackson.core.util.DefaultPrettyPrinter;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
-import com.fasterxml.jackson.dataformat.yaml.YAMLGenerator;
+import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.File;
 import java.io.IOException;
-import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Advanced configuration management system supporting JSON and YAML formats.
- * Provides automatic serialization/deserialization using Jackson with intelligent caching.
+ * Advanced configuration management system using Paper's native YAML implementation.
+ * Provides automatic serialization/deserialization with intelligent caching.
  *
  * <p>Features:
  * <ul>
@@ -33,11 +27,11 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <li>Configuration validation</li>
  *   <li>Hot-reloading support</li>
  *   <li>Thread-safe caching</li>
- *   <li>Pretty-printed output</li>
+ *   <li>No external dependencies</li>
  * </ul>
  *
  * @author KawaiiDevelopment
- * @version 1.0
+ * @version 2.0
  */
 public final class ConfigManager {
 
@@ -80,11 +74,9 @@ public final class ConfigManager {
         }
 
         String fileName = configAnnotation.fileName();
-        FileType fileType = configAnnotation.fileType();
         boolean createBackup = configAnnotation.createBackup();
 
-        File configFile = getConfigFile(plugin, fileName, fileType);
-        ObjectMapper mapper = getObjectMapper(fileType);
+        File configFile = getConfigFile(plugin, fileName);
 
         T config;
 
@@ -93,7 +85,7 @@ public final class ConfigManager {
                 // Create new config with defaults
                 plugin.getSLF4JLogger().info("Creating new configuration file: {}", fileName);
                 config = createDefaultConfig(configClass);
-                saveConfigToFile(plugin, config, configFile, mapper);
+                saveConfigToFile(plugin, config, configFile);
             } else {
                 // Load existing config
                 plugin.getSLF4JLogger().info("Loading configuration file: {}", fileName);
@@ -103,10 +95,11 @@ public final class ConfigManager {
                     createBackup(plugin, configFile);
                 }
 
-                config = mapper.readValue(configFile, configClass);
+                YamlConfiguration yamlConfig = YamlConfiguration.loadConfiguration(configFile);
+                config = deserializeConfig(configClass, yamlConfig);
 
                 // Save back to update any new fields
-                saveConfigToFile(plugin, config, configFile, mapper);
+                saveConfigToFile(plugin, config, configFile);
             }
 
             // Cache the config
@@ -114,7 +107,7 @@ public final class ConfigManager {
 
             return config;
 
-        } catch (IOException e) {
+        } catch (Exception e) {
             String error = String.format("Failed to load configuration '%s'", fileName);
             plugin.getSLF4JLogger().error(error, e);
             throw new IllegalStateException(error, e);
@@ -142,25 +135,22 @@ public final class ConfigManager {
         }
 
         String fileName = configAnnotation.fileName();
-        FileType fileType = configAnnotation.fileType();
         boolean createBackup = configAnnotation.createBackup();
 
         plugin.getSLF4JLogger().info("Saving configuration file: {}", fileName);
 
-        File configFile = getConfigFile(plugin, fileName, fileType);
+        File configFile = getConfigFile(plugin, fileName);
 
         // Create backup before saving
         if (createBackup && configFile.exists()) {
             createBackup(plugin, configFile);
         }
 
-        ObjectMapper mapper = getObjectMapper(fileType);
-
         try {
-            saveConfigToFile(plugin, configObject, configFile, mapper);
+            saveConfigToFile(plugin, configObject, configFile);
             // Update cache
             configCache.put(configObject.getClass(), configObject);
-        } catch (IOException e) {
+        } catch (Exception e) {
             String error = String.format("Failed to save configuration '%s'", fileName);
             plugin.getSLF4JLogger().error(error, e);
             throw new IllegalStateException(error, e);
@@ -198,58 +188,20 @@ public final class ConfigManager {
     }
 
     /**
-     * Gets the configuration file for the specified name and type.
+     * Gets the configuration file for the specified name.
      *
      * @param plugin   The plugin instance
      * @param fileName The base file name (without extension)
-     * @param fileType The file type (JSON or YAML)
      * @return The configuration File object
      */
     @NotNull
-    private static File getConfigFile(@NotNull JavaPlugin plugin,
-                                      @NotNull String fileName,
-                                      @NotNull FileType fileType) {
+    private static File getConfigFile(@NotNull JavaPlugin plugin, @NotNull String fileName) {
         // Ensure data folder exists
         if (!plugin.getDataFolder().exists()) {
             plugin.getDataFolder().mkdirs();
         }
 
-        String extension = fileType == FileType.YAML ? ".yml" : ".json";
-        return new File(plugin.getDataFolder(), fileName + extension);
-    }
-
-    /**
-     * Gets a configured ObjectMapper for the specified file type.
-     *
-     * @param fileType The file type (JSON or YAML)
-     * @return Configured ObjectMapper instance
-     */
-    @NotNull
-    private static ObjectMapper getObjectMapper(@NotNull FileType fileType) {
-        ObjectMapper mapper;
-
-        if (fileType == FileType.YAML) {
-            YAMLFactory yamlFactory = YAMLFactory.builder()
-                    .disable(YAMLGenerator.Feature.WRITE_DOC_START_MARKER)
-                    .enable(YAMLGenerator.Feature.MINIMIZE_QUOTES)
-                    .enable(YAMLGenerator.Feature.INDENT_ARRAYS)
-                    .build();
-            mapper = new ObjectMapper(yamlFactory);
-        } else {
-            mapper = new ObjectMapper(new JsonFactory());
-            DefaultPrettyPrinter printer = new DefaultPrettyPrinter();
-            printer.indentArraysWith(DefaultIndenter.SYSTEM_LINEFEED_INSTANCE);
-            mapper.setDefaultPrettyPrinter(printer);
-        }
-
-        // Configure mapper
-        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
-                .configure(JsonParser.Feature.ALLOW_COMMENTS, true)
-                .configure(JsonGenerator.Feature.IGNORE_UNKNOWN, true)
-                .configure(SerializationFeature.INDENT_OUTPUT, true)
-                .configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
-
-        return mapper;
+        return new File(plugin.getDataFolder(), fileName + ".yml");
     }
 
     /**
@@ -263,8 +215,7 @@ public final class ConfigManager {
     private static <T> T createDefaultConfig(@NotNull Class<T> configClass) {
         try {
             return configClass.getDeclaredConstructor().newInstance();
-        } catch (InstantiationException | IllegalAccessException |
-                 InvocationTargetException | NoSuchMethodException e) {
+        } catch (Exception e) {
             throw new IllegalStateException(
                     "Failed to create default config for " + configClass.getSimpleName() +
                             ". Ensure it has a public no-args constructor.", e);
@@ -272,20 +223,210 @@ public final class ConfigManager {
     }
 
     /**
-     * Saves a configuration object to a file.
+     * Saves a configuration object to a file using Bukkit's YAML system.
      *
      * @param plugin The plugin instance
      * @param config The configuration object
      * @param file   The target file
-     * @param mapper The ObjectMapper to use
      * @throws IOException if saving fails
      */
     private static void saveConfigToFile(@NotNull JavaPlugin plugin,
                                          @NotNull Object config,
-                                         @NotNull File file,
-                                         @NotNull ObjectMapper mapper) throws IOException {
-        mapper.writeValue(file, config);
+                                         @NotNull File file) throws IOException {
+        YamlConfiguration yamlConfig = new YamlConfiguration();
+        serializeConfig(config, yamlConfig);
+        yamlConfig.save(file);
         plugin.getSLF4JLogger().debug("Successfully saved configuration to: {}", file.getName());
+    }
+
+    /**
+     * Serializes a configuration object into a YamlConfiguration.
+     *
+     * @param config     The configuration object
+     * @param yamlConfig The target YamlConfiguration
+     */
+    private static void serializeConfig(@NotNull Object config, @NotNull YamlConfiguration yamlConfig) {
+        Class<?> clazz = config.getClass();
+
+        for (Field field : clazz.getDeclaredFields()) {
+            // Skip static and transient fields
+            if (Modifier.isStatic(field.getModifiers()) || Modifier.isTransient(field.getModifiers())) {
+                continue;
+            }
+
+            field.setAccessible(true);
+
+            try {
+                Object value = field.get(config);
+                String path = field.getName();
+
+                if (value == null) {
+                    yamlConfig.set(path, null);
+                } else if (isSimpleType(value)) {
+                    yamlConfig.set(path, value);
+                } else if (value instanceof List) {
+                    yamlConfig.set(path, value);
+                } else if (value instanceof Map) {
+                    yamlConfig.set(path, value);
+                } else {
+                    // Nested object - serialize recursively
+                    ConfigurationSection section = yamlConfig.createSection(path);
+                    serializeNestedObject(value, section);
+                }
+            } catch (IllegalAccessException e) {
+                throw new RuntimeException("Failed to serialize field: " + field.getName(), e);
+            }
+        }
+    }
+
+    /**
+     * Serializes a nested configuration object into a ConfigurationSection.
+     *
+     * @param obj     The nested object
+     * @param section The target section
+     */
+    private static void serializeNestedObject(@NotNull Object obj, @NotNull ConfigurationSection section) {
+        Class<?> clazz = obj.getClass();
+
+        for (Field field : clazz.getDeclaredFields()) {
+            if (Modifier.isStatic(field.getModifiers()) || Modifier.isTransient(field.getModifiers())) {
+                continue;
+            }
+
+            field.setAccessible(true);
+
+            try {
+                Object value = field.get(obj);
+                String path = field.getName();
+
+                if (value == null) {
+                    section.set(path, null);
+                } else if (isSimpleType(value)) {
+                    section.set(path, value);
+                } else if (value instanceof List) {
+                    section.set(path, value);
+                } else if (value instanceof Map) {
+                    section.set(path, value);
+                } else {
+                    // Further nested object
+                    ConfigurationSection nestedSection = section.createSection(path);
+                    serializeNestedObject(value, nestedSection);
+                }
+            } catch (IllegalAccessException e) {
+                throw new RuntimeException("Failed to serialize nested field: " + field.getName(), e);
+            }
+        }
+    }
+
+    /**
+     * Deserializes a YamlConfiguration into a configuration object.
+     *
+     * @param configClass The configuration class
+     * @param yamlConfig  The source YamlConfiguration
+     * @param <T>         The type of the configuration class
+     * @return The deserialized configuration object
+     */
+    @NotNull
+    private static <T> T deserializeConfig(@NotNull Class<T> configClass,
+                                           @NotNull YamlConfiguration yamlConfig) {
+        T config = createDefaultConfig(configClass);
+
+        for (Field field : configClass.getDeclaredFields()) {
+            if (Modifier.isStatic(field.getModifiers()) || Modifier.isTransient(field.getModifiers())) {
+                continue;
+            }
+
+            field.setAccessible(true);
+            String path = field.getName();
+
+            try {
+                if (!yamlConfig.contains(path)) {
+                    continue; // Keep default value
+                }
+
+                Object value = yamlConfig.get(path);
+
+                if (value == null) {
+                    field.set(config, null);
+                } else if (isSimpleType(value)) {
+                    field.set(config, value);
+                } else if (value instanceof List) {
+                    field.set(config, value);
+                } else if (value instanceof Map) {
+                    field.set(config, value);
+                } else if (yamlConfig.isConfigurationSection(path)) {
+                    // Nested object
+                    ConfigurationSection section = yamlConfig.getConfigurationSection(path);
+                    Object nestedObj = deserializeNestedObject(field.getType(), section);
+                    field.set(config, nestedObj);
+                }
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to deserialize field: " + field.getName(), e);
+            }
+        }
+
+        return config;
+    }
+
+    /**
+     * Deserializes a ConfigurationSection into a nested object.
+     *
+     * @param clazz   The class of the nested object
+     * @param section The source section
+     * @return The deserialized object
+     */
+    @NotNull
+    private static Object deserializeNestedObject(@NotNull Class<?> clazz,
+                                                  @NotNull ConfigurationSection section) {
+        try {
+            Object obj = clazz.getDeclaredConstructor().newInstance();
+
+            for (Field field : clazz.getDeclaredFields()) {
+                if (Modifier.isStatic(field.getModifiers()) || Modifier.isTransient(field.getModifiers())) {
+                    continue;
+                }
+
+                field.setAccessible(true);
+                String path = field.getName();
+
+                if (!section.contains(path)) {
+                    continue;
+                }
+
+                Object value = section.get(path);
+
+                if (value == null) {
+                    field.set(obj, null);
+                } else if (isSimpleType(value)) {
+                    field.set(obj, value);
+                } else if (value instanceof List) {
+                    field.set(obj, value);
+                } else if (value instanceof Map) {
+                    field.set(obj, value);
+                } else if (section.isConfigurationSection(path)) {
+                    ConfigurationSection nestedSection = section.getConfigurationSection(path);
+                    Object nestedObj = deserializeNestedObject(field.getType(), nestedSection);
+                    field.set(obj, nestedObj);
+                }
+            }
+
+            return obj;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to deserialize nested object: " + clazz.getSimpleName(), e);
+        }
+    }
+
+    /**
+     * Checks if a value is a simple type that can be directly serialized.
+     *
+     * @param value The value to check
+     * @return true if it's a simple type
+     */
+    private static boolean isSimpleType(@NotNull Object value) {
+        return value instanceof String ||
+                value instanceof Number ||
+                value instanceof Boolean ||
+                value instanceof Character;
     }
 
     /**
@@ -302,7 +443,7 @@ public final class ConfigManager {
             }
 
             String timestamp = LocalDateTime.now().format(BACKUP_FORMAT);
-            String backupName = configFile.getName().replace(".", "_" + timestamp + ".");
+            String backupName = configFile.getName().replace(".yml", "_" + timestamp + ".yml");
             File backupFile = new File(backupDir, backupName);
 
             Files.copy(configFile.toPath(), backupFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
@@ -314,14 +455,11 @@ public final class ConfigManager {
 
     /**
      * Enumeration of supported configuration file types.
+     * Note: Only YAML is currently supported in this refactored version.
      */
     public enum FileType {
         /**
-         * JSON format configuration
-         */
-        JSON,
-        /**
-         * YAML format configuration
+         * YAML format configuration (only supported format)
          */
         YAML
     }

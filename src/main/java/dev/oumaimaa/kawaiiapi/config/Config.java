@@ -39,12 +39,6 @@ public @interface Config {
      */
     String fileName();
 
-    /**
-     * The format/type of the configuration file.
-     *
-     * @return The file type (JSON or YAML)
-     */
-    ConfigManager.FileType fileType();
 
     /**
      * Whether to create backups when saving the configuration.

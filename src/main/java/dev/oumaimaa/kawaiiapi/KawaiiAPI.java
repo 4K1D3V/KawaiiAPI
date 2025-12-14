@@ -61,6 +61,16 @@ public final class KawaiiAPI extends JavaPlugin {
             return;
         }
 
+        printBanner();
+    }
+
+    @Override
+    public void onDisable() {
+        getSLF4JLogger().info("KawaiiAPI v1.0 disabled successfully");
+        instance = null;
+    }
+
+    public void printBanner(){
         Component banner = Component.text()
                 .append(Component.text("╔═══════════════════════════════════════╗", NamedTextColor.AQUA))
                 .append(Component.newline())
@@ -75,12 +85,6 @@ public final class KawaiiAPI extends JavaPlugin {
                 .append(Component.text("╚═══════════════════════════════════════╝", NamedTextColor.AQUA))
                 .build();
 
-        getSLF4JLogger().info(banner.toString());
-    }
-
-    @Override
-    public void onDisable() {
-        getSLF4JLogger().info("KawaiiAPI v1.0 disabled successfully");
-        instance = null;
+        getServer().getConsoleSender().sendMessage(banner);
     }
 }
