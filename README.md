@@ -31,7 +31,7 @@ elopment.
 
 ### ⚙️ **Configuration Management**
 - **Annotation-Based**: `@Config` annotation for declarative configuration
-- **Multi-Format Support**: JSON and YAML with Jackson serialization
+- **Yaml Support**: YAML with BukkitAPI serialization
 - **Auto-Generation**: Creates default configs if missing
 - **Backup System**: Optional timestamped backups before saving
 - **Hot Reloading**: Reload configurations without restart
